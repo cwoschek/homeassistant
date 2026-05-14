@@ -1,0 +1,175 @@
+blueprint:
+  name: Motion-activated Light (Brightness, Temperature, Lux)
+  description: "Turn the light on to a given brightness and temperature when motion is detected, depending on the selected time period,\
+    \ different brightness and temperature can be set.\n\
+    \ Optionally you can set a lux treshold which will not turn on the light if lux sensor reports more light than the threshold."
+  domain: automation
+  author: christoph.woschek@gmail.com
+  homeassistant:
+    min_version: 2026.1.3
+  input:
+    motion_entity:
+      name: Motion Sensor
+      selector:
+        entity:
+          filter:
+            - device_class: occupancy
+              domain: binary_sensor
+            - device_class: motion
+              domain: binary_sensor
+    light_target:
+      name: Light
+      selector:
+        target:
+          entity:
+            domain: light
+    on_night_time:
+      name: (Required) On Time Night
+      description: The time when the night mode starts.
+      selector:
+        time: {}
+    off_night_time:
+      name: (Required) Off Time Night
+      description: The time when the night mode ends.
+      selector:
+        time: {}
+    day_brightness:
+      name: (Required) Day brightness
+      description: Brightness, in daytime mode
+      default: 100
+      selector:
+        number:
+          min: 1.0
+          max: 100.0
+          step: 1.0
+          mode: slider
+    night_brightness:
+      name: (Required) Night brightness
+      description: Brightness, in night mode
+      default: 20
+      selector:
+        number:
+          min: 1.0
+          max: 100.0
+          step: 1.0
+          mode: slider
+    day_temp:
+      name: (Required) Day temp
+      description: Temp, in daytime mode
+      default: 1
+      selector: 
+        color_temp:
+    night_temp:
+      name: (Required) Night temp
+      description: Temp, in night mode
+      default: 1
+      selector: 
+        color_temp:
+    illuminance_sensor:
+      name: (Optional) Illuminance sensor
+      description: The illuminance sensor to get lux data.
+      default:
+      selector:
+        entity:
+          domain: sensor
+          device_class: illuminance
+    illuminance_cutoff:
+      name: (Optional) Illuminance threshold
+      description: The threshold to compare to the current illumination (lux above this value will NOT turn on the light).
+      default: 50
+      selector:
+        number:
+          min: 0
+          max: 10000
+          unit_of_measurement: lx
+    no_motion_wait_day:
+      name: Wait time day
+      description: Time to leave the light on after detecting the last movement for daytime mode.
+      default: 10
+      selector:
+        number:
+          min: 0
+          max: 3600
+          unit_of_measurement: seconds
+    no_motion_wait_night:
+      name: Wait time night
+      description: Time to leave the light on after detecting the last movement in night mode
+      default: 10
+      selector:
+        number:
+          min: 0
+          max: 3600
+          unit_of_measurement: seconds
+
+# If motion is detected within the delay,
+# we restart the script.
+mode: restart
+max_exceeded: silent
+
+trigger:
+  platform: state
+  entity_id: !input motion_entity
+  from: "off"
+  to: "on"
+
+action:
+  - choose:
+      # IF light above threshold (cass dummy service to do nothing)
+      - conditions: 
+          - condition: numeric_state
+            entity_id: !input illuminance_sensor
+            above: !input illuminance_cutoff
+        sequence:
+          - alias: "Wait until there is no motion from device"
+            wait_for_trigger:
+              platform: state
+              entity_id: !input motion_entity
+              from: "on"
+              to: "off"
+          - alias: "Wait the number of seconds that has been set"
+            delay: !input no_motion_wait_night
+          - alias: "Turn off the light"
+            service: light.turn_off
+            target: !input light_target
+      # ELIF light bellow threshold (turn on night light)
+      - conditions:
+          - condition: time
+            after: !input on_night_time
+            before: !input off_night_time
+        sequence:
+          - alias: "Turn on the light"
+            service: light.turn_on
+            data:
+              brightness_pct: !input night_brightness
+              color_temp: !input night_temp
+            target: !input light_target
+          - alias: "Wait until there is no motion from device"
+            wait_for_trigger:
+              platform: state
+              entity_id: !input motion_entity
+              from: "on"
+              to: "off"
+          - alias: "Wait the number of seconds that has been set"
+            delay: !input no_motion_wait_night
+          - alias: "Turn off the light"
+            service: light.turn_off
+            target: !input light_target
+    # ELSE (Turn on day light)
+    default:
+      - alias: "Turn on the light"
+        service: light.turn_on
+        data:
+          brightness_pct: !input day_brightness
+          color_temp: !input day_temp
+        target: !input light_target
+      - alias: "Wait until there is no motion from device"
+        wait_for_trigger:
+          platform: state
+          entity_id: !input motion_entity
+          from: "on"
+          to: "off"
+      - alias: "Wait the number of seconds that has been set"
+        delay: !input no_motion_wait_day
+      - alias: "Turn off the light"
+        service: light.turn_off
+        target: !input light_target
